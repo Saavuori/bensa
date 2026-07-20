@@ -1,0 +1,8 @@
+services:
+  redis:
+    image: redis:8.0-M02-alpine
+    container_name: bensa-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning

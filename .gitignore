@@ -1,0 +1,26 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/*
+!.vscode/extensions.json
+.idea
+
+# Backend (Go)
+backend/scratch_stations.json
+# Frontend build embedded into the binary at image-build time; only the
+# .gitkeep placeholder is tracked so //go:embed all:dist compiles in a checkout.
+backend/internal/api/dist/*
+!backend/internal/api/dist/.gitkeep
+*.exe
+*.exe~
+*.test
+*.out
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+/dist-changelog

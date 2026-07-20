@@ -1,0 +1,12 @@
+.git
+.github
+.claude
+.agents
+docs
+scripts
+dist-changelog
+frontend/node_modules
+frontend/dist
+backend/internal/api/dist
+*.md
+!frontend/README.md

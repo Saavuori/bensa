@@ -1,0 +1,41 @@
+# Production stack for bensa (rootless Podman on the Oracle host).
+#
+# TLS termination is NOT here: the Caddy container from the ratikka stack owns
+# :80/:443 on this host and proxies polttoaine.duckdns.org to this backend over
+# the shared external `web-proxy` network.
+services:
+  bensa-backend:
+    image: ghcr.io/saavuori/bensa:latest
+    container_name: bensa-backend
+    restart: unless-stopped
+    environment:
+      - REDIS_URL=redis://bensa-cache:6379
+      - PORT=8080
+    networks:
+      - default
+      - web-proxy
+    depends_on:
+      - bensa-cache
+
+  bensa-cache:
+    image: docker.io/library/redis:8-alpine
+    container_name: bensa-cache
+    restart: unless-stopped
+    # Prices persist to disk so a restart serves the last good data immediately
+    # rather than showing a loading state until the next upstream poll.
+    command: redis-server --appendonly yes --maxmemory 64mb --maxmemory-policy noeviction
+    volumes:
+      - bensa-redis:/data:Z
+    networks:
+      - default
+
+networks:
+  # `default` must be declared explicitly: the podman-compose on the host errors
+  # with "missing networks: default" when a service names it but the top-level
+  # networks block doesn't define it.
+  default:
+  web-proxy:
+    external: true
+
+volumes:
+  bensa-redis:

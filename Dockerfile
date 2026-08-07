@@ -24,7 +24,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     -o bensa ./cmd/server
 
 # Stage 3: Minimal runtime
-FROM alpine:3.21
+FROM alpine:3.24
 RUN apk --no-cache add ca-certificates tzdata
 WORKDIR /app
 COPY --from=backend-builder /app/bensa .

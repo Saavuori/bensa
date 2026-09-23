@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"time"
 
 	"bensa/internal/models"
@@ -14,12 +15,18 @@ import (
 // Statistics Finland PxWeb table 11xx: "Polttonesteiden keskihintoja",
 // monthly national average consumer prices (incl. VAT) from 2002M01 onwards.
 // Open data under CC BY 4.0 — attribution is rendered in the frontend footer.
-const statFinTableURL = "https://pxdata.stat.fi/PxWeb/api/v1/fi/StatFin/khi/11xx.px"
+// A var only so tests can point the client at a fake server.
+var statFinTableURL = "https://pxdata.stat.fi/PxWeb/api/v1/fi/StatFin/khi/11xx.px"
 
-// PxWeb commodity codes, mapped to the same fuel keys the station feed uses so
-// the frontend can put a station's price and the national average on one axis.
-// Light heating oil (0400500) is deliberately omitted — it isn't sold at the
-// pump, so it has no station-level counterpart.
+// PxWeb dimension codes of table 11xx.
+const (
+	dimCommodity = "coicop_13_20160512"
+	dimMonth     = "timeperiod_m"
+)
+
+// PxWeb commodity codes, mapped to the fuel keys the frontend's lib/fuels.ts
+// colours and orders. Light heating oil (0400500) is deliberately omitted — it
+// isn't sold at the pump.
 var statFinCommodities = map[string]string{
 	"0700100": "diesel",
 	"0700200": "95E10",
@@ -27,18 +34,28 @@ var statFinCommodities = map[string]string{
 	"0700800": "biokaasu",
 }
 
-// statFinQuery asks for every commodity we map, over the last n months.
+// statFinQuery is a PxWeb data request: one selection per dimension.
 type statFinQuery struct {
-	Query []struct {
-		Code      string `json:"code"`
-		Selection struct {
-			Filter string   `json:"filter"`
-			Values []string `json:"values"`
-		} `json:"selection"`
-	} `json:"query"`
+	Query    []statFinSelection `json:"query"`
 	Response struct {
 		Format string `json:"format"`
 	} `json:"response"`
+}
+
+type statFinSelection struct {
+	Code      string `json:"code"`
+	Selection struct {
+		Filter string   `json:"filter"`
+		Values []string `json:"values"`
+	} `json:"selection"`
+}
+
+func selection(code, filter string, values ...string) statFinSelection {
+	var s statFinSelection
+	s.Code = code
+	s.Selection.Filter = filter
+	s.Selection.Values = values
+	return s
 }
 
 // jsonStat2 is the subset of the JSON-stat2 response we actually read. The
@@ -56,28 +73,22 @@ type jsonStat2 struct {
 	Updated string `json:"updated"`
 }
 
-// FetchNationalTrend pulls the last `months` months of national average prices.
+// FetchNationalTrend pulls the whole history of national average prices.
 // Returns one series per fuel, oldest point first.
-func FetchNationalTrend(ctx context.Context, months int) ([]models.TrendSeries, error) {
+func FetchNationalTrend(ctx context.Context) ([]models.TrendSeries, error) {
 	codes := make([]string, 0, len(statFinCommodities))
 	for code := range statFinCommodities {
 		codes = append(codes, code)
 	}
+	sort.Strings(codes)
 
 	var q statFinQuery
-	q.Query = make([]struct {
-		Code      string `json:"code"`
-		Selection struct {
-			Filter string   `json:"filter"`
-			Values []string `json:"values"`
-		} `json:"selection"`
-	}, 2)
-	q.Query[0].Code = "coicop_13_20160512"
-	q.Query[0].Selection.Filter = "item"
-	q.Query[0].Selection.Values = codes
-	q.Query[1].Code = "timeperiod_m"
-	q.Query[1].Selection.Filter = "top"
-	q.Query[1].Selection.Values = []string{fmt.Sprintf("%d", months)}
+	q.Query = []statFinSelection{
+		selection(dimCommodity, "item", codes...),
+		// Every month the table has, rather than a "top N" count that would
+		// quietly start dropping the oldest months once the table outgrew it.
+		selection(dimMonth, "all", "*"),
+	}
 	q.Response.Format = "json-stat2"
 
 	body, err := json.Marshal(q)
@@ -126,6 +137,11 @@ func decodeTrend(ds *jsonStat2) ([]models.TrendSeries, error) {
 		strides[i] = stride
 		stride *= ds.Size[i]
 	}
+	// A value array that doesn't cover the declared cube means the strides are
+	// wrong, and every price read through them would belong to another cell.
+	if len(ds.Value) != stride {
+		return nil, fmt.Errorf("statfin: %d values for a cube of %d cells", len(ds.Value), stride)
+	}
 
 	dimPos := func(name string) (int, bool) {
 		for i, id := range ds.ID {
@@ -136,24 +152,28 @@ func decodeTrend(ds *jsonStat2) ([]models.TrendSeries, error) {
 		return 0, false
 	}
 
-	timePos, ok := dimPos("timeperiod_m")
+	timePos, ok := dimPos(dimMonth)
 	if !ok {
 		return nil, fmt.Errorf("statfin: missing time dimension")
 	}
-	commodityPos, ok := dimPos("coicop_13_20160512")
+	commodityPos, ok := dimPos(dimCommodity)
 	if !ok {
 		return nil, fmt.Errorf("statfin: missing commodity dimension")
 	}
 
-	months := ds.Dimension["timeperiod_m"].Category.Index
-	commodities := ds.Dimension["coicop_13_20160512"].Category.Index
+	months := ds.Dimension[dimMonth].Category.Index
+	commodities := ds.Dimension[dimCommodity].Category.Index
+	if len(months) != ds.Size[timePos] || len(commodities) != ds.Size[commodityPos] {
+		return nil, fmt.Errorf("statfin: category counts (%d months, %d commodities) don't match size %v",
+			len(months), len(commodities), ds.Size)
+	}
 
 	// PxWeb returns months already in chronological order, but the category
 	// index is a map, so sort by the index it carries rather than by iteration.
 	orderedMonths := make([]string, len(months))
 	for month, idx := range months {
-		if idx < 0 || idx >= len(orderedMonths) {
-			return nil, fmt.Errorf("statfin: month index %d out of range", idx)
+		if idx < 0 || idx >= len(orderedMonths) || orderedMonths[idx] != "" {
+			return nil, fmt.Errorf("statfin: bad month index %d for %s", idx, month)
 		}
 		orderedMonths[idx] = month
 	}
@@ -164,15 +184,14 @@ func decodeTrend(ds *jsonStat2) ([]models.TrendSeries, error) {
 		if !mapped {
 			continue
 		}
+		if cIdx < 0 || cIdx >= ds.Size[commodityPos] {
+			return nil, fmt.Errorf("statfin: bad commodity index %d for %s", cIdx, code)
+		}
 		points := make([]models.TrendPoint, 0, len(orderedMonths))
 		for mIdx, month := range orderedMonths {
-			offset := mIdx*strides[timePos] + cIdx*strides[commodityPos]
-			if offset >= len(ds.Value) {
-				continue
-			}
-			// PxWeb uses null for suppressed/missing months; skip rather than
-			// charting a zero.
-			if v := ds.Value[offset]; v != nil {
+			// PxWeb uses null for suppressed/missing months (biogas, for one,
+			// only starts in 2025); skip rather than charting a zero.
+			if v := ds.Value[mIdx*strides[timePos]+cIdx*strides[commodityPos]]; v != nil {
 				points = append(points, models.TrendPoint{Month: month, Price: *v})
 			}
 		}
@@ -184,10 +203,11 @@ func decodeTrend(ds *jsonStat2) ([]models.TrendSeries, error) {
 	if len(series) == 0 {
 		return nil, fmt.Errorf("statfin: no usable series in response")
 	}
+	// Map iteration order is random; keep the payload stable between polls.
+	sort.Slice(series, func(i, j int) bool { return series[i].Fuel < series[j].Fuel })
 	return series, nil
 }
 
-// Shared across every upstream client in this package.
 var httpClient = &http.Client{Timeout: 30 * time.Second}
 
 const userAgent = "bensa/1.0 (+https://polttoaine.duckdns.org)"

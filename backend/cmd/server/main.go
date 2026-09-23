@@ -19,9 +19,6 @@ import (
 const (
 	pollInterval  = 6 * time.Hour
 	retryInterval = 10 * time.Minute
-	// Full history: table 11xx starts at 2002M01 (~290 months and growing).
-	// One request, cached hard — the chart shows the whole series.
-	historyMonths = 400
 )
 
 const sourceAttribution = "Tilastokeskus, kuluttajahintaindeksi (CC BY 4.0)"
@@ -29,7 +26,7 @@ const sourceAttribution = "Tilastokeskus, kuluttajahintaindeksi (CC BY 4.0)"
 func pollTrend(redisCache *cache.RedisCache) {
 	for {
 		ctx := context.Background()
-		series, err := api.FetchNationalTrend(ctx, historyMonths)
+		series, err := api.FetchNationalTrend(ctx)
 		if err != nil {
 			log.Printf("Error fetching national trend: %v", err)
 			time.Sleep(retryInterval)

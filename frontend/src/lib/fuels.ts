@@ -25,6 +25,7 @@ export const FUELS: FuelMeta[] = [
 ];
 
 const BY_KEY = new Map(FUELS.map((f) => [f.key, f]));
+const RANK = new Map(FUELS.map((f, i) => [f.key, i]));
 
 export function fuelLabel(key: string): string {
   return BY_KEY.get(key)?.label ?? key;
@@ -36,6 +37,5 @@ export function fuelColor(key: string, theme: Theme): string {
 
 /** Order an arbitrary set of fuel keys by the canonical FUELS order. */
 export function orderFuels(keys: string[]): string[] {
-  const rank = new Map(FUELS.map((f, i) => [f.key, i]));
-  return [...keys].sort((a, b) => (rank.get(a) ?? 99) - (rank.get(b) ?? 99));
+  return [...keys].sort((a, b) => (RANK.get(a) ?? 99) - (RANK.get(b) ?? 99));
 }

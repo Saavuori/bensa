@@ -1,6 +1,6 @@
 services:
   redis:
-    image: redis:8.0-M02-alpine
+    image: redis:8-alpine
     container_name: bensa-redis
     ports:
       - "6379:6379"

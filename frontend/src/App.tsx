@@ -17,6 +17,8 @@ const RANGES: { label: string; months: number | null }[] = [
   { label: 'Max', months: null },
 ];
 
+const RETRY_MS = 5000;
+
 type LoadState =
   | { kind: 'loading' }
   | { kind: 'not-ready' }
@@ -35,6 +37,7 @@ function App() {
 
   useEffect(() => {
     let cancelled = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
     async function load() {
       try {
         const trend = await fetchTrend();
@@ -43,23 +46,17 @@ function App() {
         if (cancelled) return;
         if (err instanceof NotReadyError) setState({ kind: 'not-ready' });
         else setState({ kind: 'error', message: (err as Error).message });
+        // Backend still warming up, or a transient failure: try again shortly.
+        // Scheduling the next attempt only once this one has settled keeps a
+        // single request in flight, so a stale failure can never land after a
+        // success and knock the page back out of the ready state.
+        retry = setTimeout(load, RETRY_MS);
       }
     }
     load();
-    // If the first fetch found the backend still warming up, retry a few times.
-    const retry = setInterval(() => {
-      setState((s) => {
-        if (s.kind === 'ready') {
-          clearInterval(retry);
-          return s;
-        }
-        load();
-        return s;
-      });
-    }, 5000);
     return () => {
       cancelled = true;
-      clearInterval(retry);
+      clearTimeout(retry);
     };
   }, []);
 

@@ -53,7 +53,7 @@ records the details so nobody re-derives them.
 
 - Version/build metadata is injected via `-ldflags` in CI, never hardcoded.
 - The upstream fetch degrades gracefully: a failed poll logs and retries, and
-  the handler falls back to the last good copy (Redis, then in-memory) rather
+  the handler serves the last good copy (in-memory, then Redis) rather
   than 500ing. A cold start with no data yet returns 503, which the frontend
   shows as a loading state.
 - Unknown `/api/*` paths 404 instead of falling through to `index.html`.

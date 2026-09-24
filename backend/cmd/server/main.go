@@ -19,9 +19,6 @@ import (
 const (
 	pollInterval  = 6 * time.Hour
 	retryInterval = 10 * time.Minute
-	// Full history: table 11xx starts at 2002M01 (~290 months and growing).
-	// One request, cached hard — the chart shows the whole series.
-	historyMonths = 400
 )
 
 const sourceAttribution = "Tilastokeskus, kuluttajahintaindeksi (CC BY 4.0)"
@@ -29,7 +26,7 @@ const sourceAttribution = "Tilastokeskus, kuluttajahintaindeksi (CC BY 4.0)"
 func pollTrend(redisCache *cache.RedisCache) {
 	for {
 		ctx := context.Background()
-		series, err := api.FetchNationalTrend(ctx, historyMonths)
+		series, err := api.FetchNationalTrend(ctx)
 		if err != nil {
 			log.Printf("Error fetching national trend: %v", err)
 			time.Sleep(retryInterval)
@@ -79,8 +76,16 @@ func main() {
 	if p := os.Getenv("PORT"); p != "" {
 		addr = ":" + p
 	}
+	// Caddy sits in front in production, but a client that never finishes its
+	// headers would otherwise hold a connection (and a goroutine) forever.
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+	}
 	log.Printf("Server listening on %s", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	if err := srv.ListenAndServe(); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
 }

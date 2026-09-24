@@ -31,13 +31,6 @@ mkdir -p ~/bensa && cd ~/bensa
 # copy deploy/docker-compose.yml and deploy/update.sh from the repo
 chmod +x update.sh
 
-# Tankille account credentials — podman-compose reads this file automatically
-cat > .env <<'EOF'
-TANKILLE_EMAIL=you@example.com
-TANKILLE_PASSWORD=...
-EOF
-chmod 600 .env
-
 podman-compose up -d
 ```
 

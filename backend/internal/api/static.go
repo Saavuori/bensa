@@ -3,7 +3,6 @@ package api
 import (
 	"embed"
 	"io/fs"
-	"log"
 	"net/http"
 	"strings"
 )
@@ -16,17 +15,16 @@ import (
 //go:embed all:dist
 var distFS embed.FS
 
-// ServeStatic serves the embedded frontend build, falling back to index.html so
-// deep links keep working (the app has no router today, but a direct hit on any
-// non-asset path should still load the map rather than 404).
-func ServeStatic(w http.ResponseWriter, r *http.Request) {
-	sub, err := fs.Sub(distFS, "dist")
-	if err != nil {
-		log.Printf("failed to get dist FS sub: %v", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
+// dist is the build output itself; fs.Sub only fails on an invalid path, and
+// "dist" is a constant the embed directive above guarantees.
+var (
+	dist, _    = fs.Sub(distFS, "dist")
+	fileServer = http.FileServer(http.FS(dist))
+)
 
+// ServeStatic serves the embedded frontend build, falling back to index.html so
+// a direct hit on any non-asset path still loads the app rather than a 404.
+func ServeStatic(w http.ResponseWriter, r *http.Request) {
 	// Unknown /api/* paths must never fall through to index.html — an API
 	// client asking for a route that doesn't exist deserves a 404, not HTML.
 	if strings.HasPrefix(r.URL.Path, "/api/") {
@@ -38,8 +36,8 @@ func ServeStatic(w http.ResponseWriter, r *http.Request) {
 	if upath == "" {
 		upath = "index.html"
 	}
-	if _, err := fs.Stat(sub, upath); err != nil {
-		if _, err := fs.Stat(sub, "index.html"); err != nil {
+	if _, err := fs.Stat(dist, upath); err != nil {
+		if _, err := fs.Stat(dist, "index.html"); err != nil {
 			http.NotFound(w, r)
 			return
 		}
@@ -47,5 +45,5 @@ func ServeStatic(w http.ResponseWriter, r *http.Request) {
 		r.URL.Path = "/"
 	}
 
-	http.FileServer(http.FS(sub)).ServeHTTP(w, r)
+	fileServer.ServeHTTP(w, r)
 }

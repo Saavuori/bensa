@@ -1,9 +1,6 @@
 package api
 
-import (
-	"encoding/json"
-	"net/http"
-)
+import "net/http"
 
 // Injected at build time via -ldflags (see Dockerfile and the CI workflow).
 // Never hardcode these — CI derives them from the git tag it just created.
@@ -14,10 +11,7 @@ var (
 )
 
 func (h *Handler) HandleGetVersion(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Content-Type", "application/json")
-
-	json.NewEncoder(w).Encode(map[string]string{
+	writeJSON(w, http.StatusOK, map[string]string{
 		"version":   Version,
 		"buildDate": BuildDate,
 		"gitCommit": GitCommit,
@@ -25,7 +19,5 @@ func (h *Handler) HandleGetVersion(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleHealth(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
